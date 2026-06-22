@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RTIAVIS Image Prompt</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="prompt-strip" aria-label="Prompt">
+        <div class="prompt-inner">
+          <div class="prompt-stack">
+            <textarea
+              id="promptInput"
+              name="prompt"
+              rows="2"
+              spellcheck="true"
+              autocomplete="off"
+              placeholder="un patio verde al atardecer"
+              autofocus
+            ></textarea>
+            <div id="additionalPromptPanel" class="additional-prompt-panel" hidden>
+              <textarea
+                id="additionalPromptInput"
+                name="additionalPrompt"
+                rows="2"
+                spellcheck="true"
+                autocomplete="off"
+                placeholder="luz cinematográfica, reflejos de cristal"
+              ></textarea>
+            </div>
+          </div>
+          <div id="sequenceIndicator" class="sequence-indicator" aria-live="polite" hidden></div>
+          <div class="controls-column">
+            <div class="control-dashboard">
+              <div class="control-main">
+                <div class="status-wrap" aria-live="polite">
+                  <span id="statusDot" class="status-dot" aria-hidden="true"></span>
+                  <span id="statusText">Idle</span>
+                </div>
+
+                <div class="settings-panel" aria-label="Generation settings">
+                  <div class="compact-fields">
+                    <label class="field-group compact-field">
+                      <span>Model</span>
+                      <select id="modelSelect" name="model">
+                        <option value="sd-turbo" selected>SD Turbo</option>
+                      </select>
+                    </label>
+
+                    <label class="field-group compact-field">
+                      <span>Size</span>
+                      <select id="sizeSelect" name="size">
+                        <option value="512x512" selected>512 x 512</option>
+                        <option value="768x512">768 x 512</option>
+                        <option value="512x768">512 x 768</option>
+                        <option value="768x768">768 x 768</option>
+                      </select>
+                    </label>
+
+                    <div class="paired-field seed-translate-row">
+                      <label class="field-group compact-field seed-field">
+                        <span>Seed</span>
+                        <input id="seedInput" name="seed" type="number" min="0" max="4294967295" placeholder="random" />
+                      </label>
+                      <label class="inline-checkbox">
+                        <span>Translate</span>
+                        <input id="translateToggle" name="translate" type="checkbox" />
+                      </label>
+                    </div>
+
+                  </div>
+
+                  <div class="slider-fields">
+                    <label class="field-group range-group">
+                      <span>Steps <output id="stepsValue">1</output></span>
+                      <input id="stepsInput" name="steps" type="range" min="1" max="50" step="1" value="1" />
+                    </label>
+
+                    <label class="field-group range-group">
+                      <span>Guidance <output id="guidanceValue">0.0</output></span>
+                      <input
+                        id="guidanceInput"
+                        name="guidance"
+                        type="range"
+                        min="0"
+                        max="10"
+                        step="0.1"
+                        value="0"
+                      />
+                    </label>
+
+                    <label id="promptBlendWeightGroup" class="field-group range-group" hidden>
+                      <span>Prompt 2 <output id="promptBlendWeightValue">0.25</output></span>
+                      <input
+                        id="promptBlendWeightInput"
+                        name="promptBlendWeight"
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value="0.25"
+                      />
+                    </label>
+
+                    <div class="paired-field batch-perturb-row">
+                      <label class="field-group range-group">
+                        <span>Batch <output id="batchValue">1</output></span>
+                        <input
+                          id="batchInput"
+                          name="batchSize"
+                          type="range"
+                          min="1"
+                          max="8"
+                          step="1"
+                          value="1"
+                        />
+                      </label>
+                      <label class="inline-checkbox">
+                        <span>Perturbed batch</span>
+                        <input id="batchWalkToggle" name="batchWalk" type="checkbox" />
+                      </label>
+                    </div>
+
+                  </div>
+                </div>
+
+                <section class="sequencer-panel" aria-labelledby="sequencerPanelTitle">
+                  <div id="sequencerPanelTitle" class="sequencer-panel-title">Sequencer</div>
+                  <div class="sequencer-controls">
+                    <div class="field-group compact-field mode-field">
+                      <span>Mode</span>
+                      <div class="sequence-mode" role="group" aria-label="Sequence type">
+                        <button class="sequence-mode-button" type="button" data-sequence-mode="words" aria-pressed="true">Words</button>
+                        <button class="sequence-mode-button" type="button" data-sequence-mode="seed" aria-pressed="false">Seed</button>
+                        <button class="sequence-mode-button" type="button" data-sequence-mode="walk" aria-pressed="false">Walk</button>
+                        <button class="sequence-mode-button" type="button" data-sequence-mode="prompts" aria-pressed="false" title="Prompt Sequencer">Prompts</button>
+                      </div>
+                    </div>
+
+                    <label class="field-group range-group">
+                      <span>Interval <output id="sequenceIntervalValue">2.0s</output></span>
+                      <input id="sequenceIntervalInput" name="sequenceInterval" type="range" min="0" max="10" step="0.5" value="2" />
+                    </label>
+
+                    <label class="field-group range-group">
+                      <span>Blend time <output id="promptSequenceDurationValue">10s</output></span>
+                      <input id="promptSequenceDurationInput" name="promptSequenceDuration" type="range" min="1" max="120" step="1" value="10" />
+                    </label>
+
+                    <div class="field-group range-group sequencer-walk-control">
+                      <span><label for="walkAmplitudeInput">Perturbation</label> <output id="walkAmplitudeValue">0.010</output></span>
+                      <div class="range-with-limit">
+                        <input id="walkAmplitudeInput" name="walkAmplitude" type="range" min="0" max="0.01" step="0.0001" value="0.01" />
+                        <label class="range-limit" for="walkAmplitudeMaxInput">
+                          Max
+                          <input id="walkAmplitudeMaxInput" name="walkAmplitudeMax" type="number" min="0.01" step="0.01" value="0.01" />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <div class="auxiliary-panels">
+                  <div id="audioMonitor" class="audio-monitor" data-active="false" aria-label="Audio input channels">
+                    <div class="audio-monitor-header">
+                      <span class="audio-monitor-state"><span aria-hidden="true"></span>Audio input <small>FFT 2048 · Hann</small></span>
+                      <div class="audio-monitor-actions">
+                        <span id="audioEventIndicator" class="audio-event">Event <output id="audioEventCount">0</output></span>
+                        <button id="audioPanelToggle" class="panel-collapse-button" type="button" aria-controls="audioChannels" aria-expanded="true" aria-label="Collapse audio panel" title="Collapse audio panel">&#9662;</button>
+                      </div>
+                    </div>
+                    <div id="audioChannels" class="audio-spectrum">
+                      <div class="audio-spectrum-main">
+                        <label class="audio-input-gain">
+                          <span>Gain</span>
+                          <input id="audioInputGain" type="range" min="-24" max="24" step="1" value="0" aria-label="Audio input gain in decibels" />
+                          <output id="audioInputGainValue">0 dB</output>
+                        </label>
+                        <canvas id="audioSpectrumCanvas" class="audio-spectrum-canvas" aria-label="Audio spectrum from 40 hertz to 8 kilohertz. Drag a threshold line to change its level."></canvas>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div id="effectsPanel" class="effects-panel" aria-label="VJ effects">
+                    <div class="effects-panel-header">
+                      <span class="effects-panel-title"><span aria-hidden="true"></span>VJ effects <small>GLSL</small></span>
+                      <button id="effectsPanelToggle" class="panel-collapse-button" type="button" aria-controls="effectsControls" aria-expanded="true" aria-label="Collapse effects panel" title="Collapse effects panel">&#9662;</button>
+                    </div>
+                    <div id="effectsControls" class="effects-controls">
+                      <label class="effect-control">
+                        <span>Crossfade <output id="crossfadeValue">1.0s</output></span>
+                        <input id="crossfadeInput" type="range" min="0" max="100" step="0.1" value="47.4" aria-label="Crossfade time on a logarithmic scale" />
+                      </label>
+                      <label class="effect-control">
+                        <span>Gamma <output id="gammaValue">1.00</output></span>
+                        <input id="gammaInput" type="range" min="0.2" max="3" step="0.05" value="1" />
+                      </label>
+                      <label class="effect-control">
+                        <span>Brightness <output id="brightnessValue">0.00</output></span>
+                        <input id="brightnessInput" type="range" min="-1" max="1" step="0.01" value="0" />
+                      </label>
+                      <label class="effect-control">
+                        <span>Saturation <output id="saturationValue">1.00</output></span>
+                        <input id="saturationInput" type="range" min="0" max="2" step="0.01" value="1" />
+                      </label>
+                      <label class="effect-control">
+                        <span>Smudge amount <output id="meltAmountValue">0.00</output></span>
+                        <input id="meltAmountInput" type="range" min="0" max="0.5" step="0.01" value="0" />
+                      </label>
+                      <label class="effect-control">
+                        <span>Smudge variation <output id="meltVariationValue">0.30</output></span>
+                        <input id="meltVariationInput" type="range" min="0" max="1" step="0.01" value="0.30" />
+                      </label>
+                      <label class="effect-control">
+                        <span>Smudge speed <output id="meltSpeedValue">0.35</output></span>
+                        <input id="meltSpeedInput" type="range" min="0" max="2" step="0.01" value="0.35" />
+                      </label>
+                      <label class="effect-control">
+                        <span>Reflection Tiling</span>
+                        <input id="tilingInput" type="checkbox" checked />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="action-rail" aria-label="Actions">
+                <button id="projectorButton" class="projector-button" type="button" aria-label="Open Display window" title="Open Display window">Display</button>
+                <button id="micButton" class="mic-button" type="button" aria-label="Start dictation" aria-pressed="false" title="Dictation">Dictate</button>
+                <button id="resetButton" class="reset-button" type="button" aria-label="Clear prompts and Display" title="Clear prompts and Display">Clear</button>
+                <button id="sequenceButton" class="sequence-button" type="button" aria-label="Generate word-by-word sequence" aria-pressed="false" title="Play word-by-word sequence">&#9654;</button>
+                <button id="promptBlendButton" class="prompt-blend-button" type="button" aria-label="Toggle additional prompt" aria-pressed="false" title="Toggle additional prompt">Blend</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="preview-stage" aria-label="Generated image">
+        <div class="image-slot" id="imageSlot">
+          <img id="previewImage" alt="Generated image preview" hidden />
+          <div class="empty-preview" id="emptyPreview">stabilityai/sd-turbo</div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>

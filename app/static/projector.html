@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RTIAVIS Projector</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/projector.css" />
+  </head>
+  <body>
+    <canvas id="projectionCanvas" aria-label="Projected generated image with GLSL effects"></canvas>
+    <button id="startButton" type="button">Start audio + fullscreen</button>
+    <div id="projectorStatus" role="status" aria-live="polite">Waiting for an image batch</div>
+    <script type="module" src="/static/projector.js"></script>
+  </body>
+</html>

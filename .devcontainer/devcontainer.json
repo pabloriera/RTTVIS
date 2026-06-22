@@ -1,0 +1,73 @@
+{
+  "name": "RTIAVIS Image Prompt Dev",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": ".."
+  },
+  "runArgs": ["--gpus", "all", "--add-host=host.docker.internal:host-gateway"],
+  "init": true,
+  "remoteUser": "vscode",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  "workspaceFolder": "/workspace",
+  "containerEnv": {
+    "PYTHON_ENV_DIR": "/models/python/venv",
+    "VIRTUAL_ENV": "/models/python/venv",
+    "ACE_PYTHON": "/models/ace/venv/bin/python",
+    "UV_PYTHON_INSTALL_DIR": "/models/ace/uv-python",
+    "UV_CACHE_DIR": "/models/ace/uv-cache",
+    "PIP_CACHE_DIR": "/models/pip-cache",
+    "HF_HOME": "/models/huggingface",
+    "HF_HUB_CACHE": "/models/huggingface/hub",
+    "HUGGINGFACE_HUB_CACHE": "/models/huggingface/hub",
+    "HF_XET_CACHE": "/models/huggingface/xet",
+    "TORCH_HOME": "/models/torch",
+    "TORCH_INDEX_URL": "https://download.pytorch.org/whl/cu124",
+    "IMAGE_MODEL_ID": "stabilityai/sd-turbo",
+    "IMAGE_MODEL_DIR": "/models/image/sd-turbo",
+    "ASR_MODEL_PATH": "/models/asr/vosk-model-small-es-0.42",
+    "ASR_SAMPLE_RATE": "16000",
+    "TRANSLATION_SOURCE": "es",
+    "TRANSLATION_TARGET": "en",
+    "TRANSLATION_TIMEOUT_SECONDS": "8",
+    "TRANSLATION_STRICT": "false",
+    "IMAGE_GENERATION_DEVICE": "cuda",
+    "IMAGE_GENERATION_DTYPE": "float16",
+    "IMAGE_WIDTH": "512",
+    "IMAGE_HEIGHT": "512",
+    "IMAGE_NUM_INFERENCE_STEPS": "1",
+    "IMAGE_GUIDANCE_SCALE": "0.0",
+    "NVIDIA_VISIBLE_DEVICES": "all",
+    "NVIDIA_DRIVER_CAPABILITIES": "compute,utility"
+  },
+  "mounts": [
+    "source=rtiavis-python-gpu-cache,target=/models/python,type=volume",
+    "source=rtiavis-ace-python,target=/models/ace,type=volume",
+    "source=rtiavis-pip-cache,target=/models/pip-cache,type=volume",
+    "source=rtiavis-hf-cache,target=/models/huggingface,type=volume",
+    "source=rtiavis-image-model-cache,target=/models/image,type=volume",
+    "source=rtiavis-vosk-cache,target=/models/asr,type=volume",
+    "source=rtiavis-torch-cache,target=/models/torch,type=volume"
+  ],
+  "forwardPorts": [8000],
+  "portsAttributes": {
+    "8000": {
+      "label": "Image prompt UI",
+      "onAutoForward": "notify"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-toolsai.jupyter",
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/models/python/venv/bin/python",
+        "python.terminal.activateEnvironment": false
+      }
+    }
+  },
+  "postCreateCommand": "bash scripts/post-create.sh"
+}
