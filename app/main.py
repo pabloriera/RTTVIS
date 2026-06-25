@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import base64
+import colorsys
+import io
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -9,6 +14,9 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+import httpx
+import numpy as np
+from PIL import Image
 from pydantic import BaseModel, Field
 
 from .image_worker import (
@@ -25,6 +33,83 @@ from .translation import TranslationManager, get_translation_config
 
 STATIC_DIR = Path(__file__).parent / "static"
 logger = logging.getLogger(__name__)
+SAM_SEGMENT_URL = os.environ.get("SAM_SEGMENT_URL", "http://172.17.0.2:8060/v1/segment")
+SAM_SEGMENT_TIMEOUT_SECONDS = float(os.environ.get("SAM_SEGMENT_TIMEOUT_SECONDS", "15"))
+SAM_SEGMENT_PROMPT = "stuff"
+
+
+def sam_mask_to_rgba(mask_img: Image.Image, prompt: str) -> str | None:
+    mask_array = np.array(mask_img)
+    if mask_array.ndim == 3:
+        if mask_array.shape[2] >= 4 and mask_array[:, :, 3].max() > 0:
+            instance_array = mask_array[:, :, 3]
+        else:
+            instance_array = np.max(mask_array[:, :, :3], axis=2)
+    else:
+        instance_array = mask_array
+
+    if np.issubdtype(instance_array.dtype, np.floating):
+        finite_values = instance_array[np.isfinite(instance_array)]
+        if finite_values.size == 0:
+            return None
+        threshold = 0.5 if float(finite_values.max()) <= 1.0 else 0.0
+        foreground = np.isfinite(instance_array) & (instance_array > threshold)
+    else:
+        foreground = instance_array > 0
+
+    if not np.any(foreground):
+        logger.warning(f"SAM 3 returned an empty mask for prompt: '{prompt}'")
+        return None
+
+    h, w = instance_array.shape
+    color_mask = np.zeros((h, w, 4), dtype=np.uint8)
+    unique_ids = np.unique(instance_array[foreground])
+    logger.info(f"SAM 3 segmented {len(unique_ids)} mask value(s) for prompt: '{prompt}'")
+
+    if unique_ids.size > 256:
+        color_mask[foreground] = [0, 180, 255, 255]
+    else:
+        for obj_id in unique_ids:
+            hue = (int(obj_id) * 137.508) % 360 / 360.0
+            r, g, b = colorsys.hsv_to_rgb(hue, 0.8, 1.0)
+            color_mask[instance_array == obj_id] = [int(r * 255), int(g * 255), int(b * 255), 255]
+
+    out_img = Image.fromarray(color_mask, mode="RGBA")
+    out_io = io.BytesIO()
+    out_img.save(out_io, format="PNG")
+    return base64.b64encode(out_io.getvalue()).decode("utf-8")
+
+
+async def get_sam_mask_async(image_base64: str, prompt: str) -> str | None:
+    if not image_base64:
+        return None
+    if image_base64.startswith("data:image/") and "," in image_base64:
+        image_base64 = image_base64.split(",", 1)[1]
+    try:
+        image_bytes = base64.b64decode(image_base64)
+    except Exception as e:
+        logger.error(f"Failed to decode image_base64: {e}")
+        return None
+
+    files = {"image": ("image.png", image_bytes, "image/png")}
+    data = {"request": json.dumps({"prompt": {"type": "text", "text": prompt}})}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                SAM_SEGMENT_URL,
+                files=files,
+                data=data,
+                timeout=SAM_SEGMENT_TIMEOUT_SECONDS,
+            )
+            if response.status_code == 200:
+                mask_img = Image.open(io.BytesIO(response.content))
+                return sam_mask_to_rgba(mask_img, prompt)
+            else:
+                logger.error(f"SAM 3 service error: status code {response.status_code}, response: {response.text}")
+    except Exception as e:
+        logger.error(f"Failed to connect to SAM 3 service: {e}")
+    return None
 
 
 @asynccontextmanager
@@ -64,6 +149,8 @@ class GenerateRequest(BaseModel):
     prompt_walk_scale: float | None = Field(default=None, ge=0.0)
     prompt_walk_momentum: float | None = Field(default=None, ge=0.0, le=0.999)
     prompt_walk_turn_scale: float | None = Field(default=None, ge=0.0, le=2.0)
+    sam: bool | None = Field(default=None)
+    sam_prompt: str | None = Field(default=None, max_length=1000)
 
 
 class GenerateResponse(BaseModel):
@@ -71,12 +158,19 @@ class GenerateResponse(BaseModel):
     stale: bool
     image_png_base64: str | None
     images_png_base64: list[str] | None = None
+    masks_png_base64: list[str] | None = None
     elapsed_ms: int
     prompt: str
     translated_prompt: str | None = None
     translated_additional_prompt: str | None = None
     translation_applied: bool = False
     translation_error: str | None = None
+
+
+class SegmentRequest(BaseModel):
+    images_png_base64: list[str]
+    prompt: str
+    translate: bool | None = None
 
 
 def get_worker(request: Request) -> ImageGenerationWorker:
@@ -229,11 +323,23 @@ async def generate(payload: GenerateRequest, request: Request) -> GenerateRespon
         logger.exception("Image generation failed.")
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    masks_png_base64 = None
+    if payload.sam:
+        s_prompt = payload.sam_prompt if payload.sam_prompt is not None else SAM_SEGMENT_PROMPT
+        if result.images_png_base64:
+            tasks = [get_sam_mask_async(img_b64, s_prompt) for img_b64 in result.images_png_base64]
+            masks_res = await asyncio.gather(*tasks)
+            masks_png_base64 = [m if m is not None else "" for m in masks_res]
+        elif result.image_png_base64:
+            mask = await get_sam_mask_async(result.image_png_base64, s_prompt)
+            masks_png_base64 = [mask if mask is not None else ""]
+
     return GenerateResponse(
         job_id=result.job_id,
         stale=result.stale,
         image_png_base64=result.image_png_base64,
         images_png_base64=result.images_png_base64,
+        masks_png_base64=masks_png_base64,
         elapsed_ms=result.elapsed_ms,
         prompt=prompt,
         translated_prompt=translation.text if translation.applied else None,
@@ -249,6 +355,22 @@ async def generate(payload: GenerateRequest, request: Request) -> GenerateRespon
         translation_error=translation.error
         or (additional_translation.error if additional_translation is not None else None),
     )
+
+
+@app.post("/api/segment")
+async def segment(payload: SegmentRequest, request: Request) -> dict[str, Any]:
+    translation_manager = request.app.state.translation_manager
+    prompt = payload.prompt
+    if payload.translate:
+        try:
+            translation = await translation_manager.translate(prompt, enabled=True)
+            prompt = translation.text
+        except Exception as e:
+            logger.error(f"Failed to translate segment prompt: {e}")
+    tasks = [get_sam_mask_async(img_b64, prompt) for img_b64 in payload.images_png_base64]
+    masks_res = await asyncio.gather(*tasks)
+    masks_png_base64 = [m if m is not None else "" for m in masks_res]
+    return {"masks_png_base64": masks_png_base64}
 
 
 @app.websocket("/ws/transcribe")

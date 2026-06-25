@@ -23,6 +23,8 @@ const crossfadeInput = document.querySelector("#crossfadeInput");
 const crossfadeValue = document.querySelector("#crossfadeValue");
 const gammaInput = document.querySelector("#gammaInput");
 const gammaValue = document.querySelector("#gammaValue");
+const contrastInput = document.querySelector("#contrastInput");
+const contrastValue = document.querySelector("#contrastValue");
 const brightnessInput = document.querySelector("#brightnessInput");
 const brightnessValue = document.querySelector("#brightnessValue");
 const saturationInput = document.querySelector("#saturationInput");
@@ -33,12 +35,24 @@ const meltVariationInput = document.querySelector("#meltVariationInput");
 const meltVariationValue = document.querySelector("#meltVariationValue");
 const meltSpeedInput = document.querySelector("#meltSpeedInput");
 const meltSpeedValue = document.querySelector("#meltSpeedValue");
+const maskedSmudgeToggle = document.querySelector("#maskedSmudgeToggle");
+const glowRadiusInput = document.querySelector("#glowRadiusInput");
+const glowRadiusValue = document.querySelector("#glowRadiusValue");
+const glowIntensityInput = document.querySelector("#glowIntensityInput");
+const glowIntensityValue = document.querySelector("#glowIntensityValue");
+const glowFrequencyInput = document.querySelector("#glowFrequencyInput");
+const glowFrequencyValue = document.querySelector("#glowFrequencyValue");
+const glowHueInput = document.querySelector("#glowHueInput");
+const glowHueValue = document.querySelector("#glowHueValue");
 const tilingInput = document.querySelector("#tilingInput");
+const samOverlayAlphaInput = document.querySelector("#samOverlayAlphaInput");
+const samOverlayAlphaValue = document.querySelector("#samOverlayAlphaValue");
 const audioEventIndicator = document.querySelector("#audioEventIndicator");
 const audioEventCount = document.querySelector("#audioEventCount");
 const sequenceIndicator = document.querySelector("#sequenceIndicator");
 const previewImage = document.querySelector("#previewImage");
 const imageSlot = document.querySelector("#imageSlot");
+const maskPreviewImage = document.createElement("img");
 const modelSelect = document.querySelector("#modelSelect");
 const sizeSelect = document.querySelector("#sizeSelect");
 const stepsInput = document.querySelector("#stepsInput");
@@ -54,6 +68,9 @@ const promptSequenceDurationValue = document.querySelector("#promptSequenceDurat
 const batchInput = document.querySelector("#batchInput");
 const batchValue = document.querySelector("#batchValue");
 const batchWalkToggle = document.querySelector("#batchWalkToggle");
+const samToggle = document.querySelector("#samToggle");
+const samPromptInput = document.querySelector("#samPromptInput");
+const samOverlayToggle = document.querySelector("#samOverlayToggle");
 const walkAmplitudeInput = document.querySelector("#walkAmplitudeInput");
 const walkAmplitudeMaxInput = document.querySelector("#walkAmplitudeMaxInput");
 const walkAmplitudeValue = document.querySelector("#walkAmplitudeValue");
@@ -70,6 +87,10 @@ const AUDIO_INPUT_GAIN_KEY = "rtiavis.audioInputGainDb.v1";
 const AUDIO_PANEL_COLLAPSED_KEY = "rtiavis.audioPanelCollapsed.v1";
 const PROJECTOR_EFFECTS_KEY = "rtiavis.projectorEffects.v1";
 const EFFECTS_PANEL_COLLAPSED_KEY = "rtiavis.effectsPanelCollapsed.v1";
+const AUDIO_MATRIX_STATE_KEY = "rtiavis.audioMatrixState.v1";
+const AUDIO_MATRIX_PANEL_COLLAPSED_KEY = "rtiavis.audioMatrixPanelCollapsed.v1";
+const PNG_DATA_URL_PREFIX = "data:image/png;base64,";
+const SAM_SEGMENT_PROMPT = "stuff";
 const AUDIO_BAND_RANGES = [[40, 160], [160, 500], [500, 2000], [2000, 8000]];
 const AUDIO_BAND_NAMES = ["Bass", "Low", "Mid", "High"];
 const AUDIO_BAND_COLORS = ["#0f766e", "#0284c7", "#7c3aed", "#d97706"];
@@ -77,12 +98,20 @@ const DEFAULT_AUDIO_THRESHOLDS_DB = [-42, -45, -48, -50];
 const DEFAULT_PROJECTOR_EFFECTS = {
   crossfadeSeconds: 1,
   gamma: 1,
+  contrast: 1,
   brightness: 0,
   saturation: 1,
   meltAmount: 0,
   meltVariation: 0.30,
   meltSpeed: 0.35,
+  maskedSmudge: false,
   tiling: 1.0,
+  glowRadius: 0.0,
+  glowIntensity: 0.5,
+  glowFrequency: 4.0,
+  glowHue: 195,
+  samOverlay: false,
+  samOverlayAlpha: 0.65,
 };
 const CROSSFADE_MIN_SECONDS = 0.05;
 const CROSSFADE_MAX_SECONDS = 30;
@@ -117,6 +146,8 @@ const DEFAULT_GENERATION_SETTINGS = {
   seed: null,
   batch_size: 1,
   batch_walk: false,
+  sam: false,
+  sam_prompt: SAM_SEGMENT_PROMPT,
   translate: false,
   prompt: "",
   sequence_interval_seconds: DEFAULT_SEQUENCE_INTERVAL_SECONDS,
@@ -151,7 +182,9 @@ let sequenceActive = false;
 let sequenceRunId = 0;
 let sequenceTextRevision = 0;
 let projectionImages = [];
+let projectionMasks = [];
 let projectedImageIndex = 0;
+let segmentationRequestId = 0;
 let projectorWindow = null;
 let projectorAudioEventCount = 0;
 let audioEventFlashTimer = null;
@@ -162,6 +195,11 @@ let audioBandDb = AUDIO_BAND_RANGES.map(() => SPECTRUM_MIN_DB);
 let triggeredAudioBands = [];
 let draggedThresholdBand = null;
 let audioThresholdsDb = [...DEFAULT_AUDIO_THRESHOLDS_DB];
+
+maskPreviewImage.className = "mask-preview-image";
+maskPreviewImage.alt = "SAM mask overlay";
+maskPreviewImage.hidden = true;
+imageSlot.append(maskPreviewImage);
 const projectorChannel = "BroadcastChannel" in window
   ? new BroadcastChannel(PROJECTOR_CHANNEL_NAME)
   : null;
@@ -233,8 +271,86 @@ function sendProjectionBatch() {
   projectorChannel.postMessage({
     type: "batch",
     images: projectionImages,
+    masks: projectionMasks,
     selectedIndex: projectedImageIndex,
   });
+}
+
+function imageDataUrl(encoded) {
+  if (!encoded) {
+    return "";
+  }
+  return encoded.startsWith("data:image/") ? encoded : `${PNG_DATA_URL_PREFIX}${encoded}`;
+}
+
+function maskDataUrl(encoded) {
+  if (!encoded) {
+    return null;
+  }
+  return encoded.startsWith("data:image/") ? encoded : `${PNG_DATA_URL_PREFIX}${encoded}`;
+}
+
+function base64FromImageDataUrl(source) {
+  return source.replace(/^data:image\/[^;]+;base64,/, "");
+}
+
+function projectionNeedsSegmentation() {
+  return projectionImages.length > 0
+    && projectionImages.some((_, index) => !projectionMasks[index]);
+}
+
+function hasProjectionMasks() {
+  return projectionMasks.some(Boolean);
+}
+
+async function segmentImagesBase64(imagesPngBase64, { statusLabel = "Segmenting" } = {}) {
+  if (!Array.isArray(imagesPngBase64) || imagesPngBase64.length === 0) {
+    return [];
+  }
+  setStatus(statusLabel, "busy");
+  const response = await fetch("/api/segment", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      images_png_base64: imagesPngBase64,
+      prompt: samPromptInput ? samPromptInput.value : SAM_SEGMENT_PROMPT,
+      translate: translateToggle ? translateToggle.checked : false,
+    }),
+  });
+  const payload = await response.json();
+  if (!response.ok || !Array.isArray(payload.masks_png_base64)) {
+    throw new Error(payload.detail || "Segmentation failed.");
+  }
+  return payload.masks_png_base64;
+}
+
+async function segmentCurrentProjectionImages({ statusLabel = "Segmenting" } = {}) {
+  if (projectionImages.length === 0 || !projectionNeedsSegmentation()) {
+    sendProjectionBatch();
+    return true;
+  }
+
+  const requestId = ++segmentationRequestId;
+  const sourceImages = [...projectionImages];
+  const imagesPngBase64 = sourceImages.map(base64FromImageDataUrl);
+  const masks = await segmentImagesBase64(
+    imagesPngBase64,
+    { statusLabel },
+  );
+
+  if (
+    requestId !== segmentationRequestId
+    || sourceImages.length !== projectionImages.length
+    || sourceImages.some((source, index) => projectionImages[index] !== source)
+  ) {
+    return false;
+  }
+
+  projectionMasks = sourceImages.map((_, index) => maskDataUrl(masks[index]));
+  sendProjectionBatch();
+  return hasProjectionMasks();
 }
 
 function setAudioPanelCollapsed(collapsed, { persist = true } = {}) {
@@ -284,6 +400,223 @@ function loadEffectsPanelState() {
   );
 }
 
+const MATRIX_EFFECTS = [
+  { key: "crossfadeSeconds", label: "Crossfade" },
+  { key: "gamma", label: "Gamma" },
+  { key: "contrast", label: "Contrast" },
+  { key: "brightness", label: "Brightness" },
+  { key: "saturation", label: "Saturation" },
+  { key: "meltAmount", label: "Smudge amount" },
+  { key: "meltVariation", label: "Smudge var" },
+  { key: "meltSpeed", label: "Smudge speed" },
+  { key: "glowRadius", label: "Glow radius" },
+  { key: "glowIntensity", label: "Glow intensity" },
+  { key: "glowFrequency", label: "Glow frequency" },
+  { key: "glowHue", label: "Glow hue" },
+  { key: "samOverlayAlpha", label: "SAM alpha" },
+];
+
+let audioMatrixState = {
+  masterGain: 1.0,
+  crossfadeSeconds: [0, 0, 0, 0],
+  gamma: [0, 0, 0, 0],
+  contrast: [0, 0, 0, 0],
+  brightness: [0, 0, 0, 0],
+  saturation: [0, 0, 0, 0],
+  meltAmount: [0, 0, 0, 0],
+  meltVariation: [0, 0, 0, 0],
+  meltSpeed: [0, 0, 0, 0],
+  glowRadius: [0, 0, 0, 0],
+  glowIntensity: [0, 0, 0, 0],
+  glowFrequency: [0, 0, 0, 0],
+  glowHue: [0, 0, 0, 0],
+  samOverlayAlpha: [0, 0, 0, 0],
+};
+
+function saveAudioMatrixState() {
+  window.localStorage.setItem(AUDIO_MATRIX_STATE_KEY, JSON.stringify(audioMatrixState));
+}
+
+function loadAudioMatrixState() {
+  try {
+    const stored = window.localStorage.getItem(AUDIO_MATRIX_STATE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (parsed && typeof parsed === "object") {
+        if (Number.isFinite(parsed.masterGain)) {
+          audioMatrixState.masterGain = parsed.masterGain;
+        }
+        Object.keys(audioMatrixState).forEach((key) => {
+          if (key !== "masterGain" && Array.isArray(parsed[key])) {
+            audioMatrixState[key] = parsed[key].map((v) => Number.isFinite(v) ? v : 0);
+          }
+        });
+      }
+    }
+  } catch (e) {
+    console.error("Failed to load audio matrix state", e);
+  }
+}
+
+function sendAudioMatrix() {
+  projectorChannel?.postMessage({ type: "audio-matrix", matrix: audioMatrixState });
+}
+
+function setAudioMatrixPanelCollapsed(collapsed, { persist = true } = {}) {
+  const panel = document.getElementById("audioMatrixPanel");
+  const controls = document.getElementById("audioMatrixControls");
+  const toggle = document.getElementById("audioMatrixPanelToggle");
+  if (!panel || !controls || !toggle) return;
+  
+  panel.dataset.collapsed = String(collapsed);
+  controls.hidden = collapsed;
+  toggle.setAttribute("aria-expanded", String(!collapsed));
+  toggle.setAttribute(
+    "aria-label",
+    collapsed ? "Expand audio matrix panel" : "Collapse audio matrix panel",
+  );
+  toggle.title = collapsed ? "Expand audio matrix panel" : "Collapse audio matrix panel";
+  toggle.textContent = collapsed ? "▸" : "▾";
+  if (persist) {
+    window.localStorage.setItem(AUDIO_MATRIX_PANEL_COLLAPSED_KEY, String(collapsed));
+  }
+}
+
+function loadAudioMatrixPanelState() {
+  setAudioMatrixPanelCollapsed(
+    window.localStorage.getItem(AUDIO_MATRIX_PANEL_COLLAPSED_KEY) === "true",
+    { persist: false },
+  );
+}
+
+function initializeAudioMatrixUI() {
+  const grid = document.querySelector(".audio-matrix-grid");
+  if (!grid) return;
+  
+  loadAudioMatrixState();
+
+  const masterInput = document.getElementById("audioMatrixGainInput");
+  const masterValue = document.getElementById("audioMatrixGainValue");
+  if (masterInput && masterValue) {
+    masterInput.value = String(audioMatrixState.masterGain);
+    masterValue.textContent = audioMatrixState.masterGain.toFixed(2) + "x";
+    
+    masterInput.addEventListener("input", () => {
+      const val = Number.parseFloat(masterInput.value);
+      audioMatrixState.masterGain = val;
+      masterValue.textContent = val.toFixed(2) + "x";
+      saveAudioMatrixState();
+      sendAudioMatrix();
+    });
+  }
+  
+  MATRIX_EFFECTS.forEach((effect) => {
+    const isGamma = effect.key === "gamma";
+    const labelDiv = document.createElement("div");
+    labelDiv.className = "audio-matrix-label";
+    labelDiv.textContent = effect.label;
+    if (isGamma) {
+      labelDiv.style.display = "none";
+    }
+    grid.appendChild(labelDiv);
+    
+    for (let bandIndex = 0; bandIndex < 4; bandIndex += 1) {
+      const container = document.createElement("div");
+      container.className = "audio-matrix-knob-container";
+      if (isGamma) {
+        container.style.display = "none";
+      }
+      
+      const knobWrapper = document.createElement("div");
+      knobWrapper.className = "audio-matrix-knob-wrapper";
+      knobWrapper.style.setProperty("--band-color", AUDIO_BAND_COLORS[bandIndex]);
+      
+      const knobDial = document.createElement("div");
+      knobDial.className = "audio-matrix-knob-dial";
+      
+      const knobPointer = document.createElement("div");
+      knobPointer.className = "audio-matrix-knob-pointer";
+      
+      knobDial.appendChild(knobPointer);
+      knobWrapper.appendChild(knobDial);
+      
+      const initialVal = audioMatrixState[effect.key]?.[bandIndex] ?? 0;
+      
+      // Minimum is -2.0, maximum is +2.0
+      const minVal = -2.0;
+      const maxVal = 2.0;
+      
+      // Total knob travel is 270 degrees (from -135 to +135)
+      const updatePointerRotation = (val) => {
+        const ratio = (val - minVal) / (maxVal - minVal);
+        const degrees = ratio * 270 - 135;
+        knobPointer.style.transform = `rotate(${degrees}deg)`;
+      };
+      
+      updatePointerRotation(initialVal);
+      
+      const valSpan = document.createElement("span");
+      valSpan.className = "audio-matrix-knob-value";
+      valSpan.textContent = (initialVal > 0 ? "+" : "") + initialVal.toFixed(2);
+      
+      // Drag behavior
+      let isDragging = false;
+      let startY = 0;
+      let startVal = 0;
+      const pixelsPerUnit = 40; // Dragging 40 pixels changes the value by 1.0 unit
+      
+      knobWrapper.addEventListener("pointerdown", (event) => {
+        isDragging = true;
+        startY = event.clientY;
+        startVal = audioMatrixState[effect.key]?.[bandIndex] ?? 0;
+        knobWrapper.setPointerCapture(event.pointerId);
+        event.preventDefault();
+      });
+      
+      knobWrapper.addEventListener("pointermove", (event) => {
+        if (!isDragging) return;
+        event.preventDefault();
+        const deltaY = startY - event.clientY; // drag up -> increase value
+        let newVal = startVal + deltaY / pixelsPerUnit;
+        newVal = Math.max(minVal, Math.min(maxVal, newVal));
+        
+        // Round to nearest 0.05
+        newVal = Math.round(newVal * 20) / 20;
+        
+        audioMatrixState[effect.key][bandIndex] = newVal;
+        valSpan.textContent = (newVal > 0 ? "+" : "") + newVal.toFixed(2);
+        updatePointerRotation(newVal);
+        
+        saveAudioMatrixState();
+        sendAudioMatrix();
+      });
+      
+      const finishDrag = (event) => {
+        if (!isDragging) return;
+        isDragging = false;
+        knobWrapper.releasePointerCapture(event.pointerId);
+      };
+      
+      knobWrapper.addEventListener("pointerup", finishDrag);
+      knobWrapper.addEventListener("pointercancel", finishDrag);
+      
+      // Double click to reset to 0.00
+      knobWrapper.addEventListener("dblclick", () => {
+        const newVal = 0.00;
+        audioMatrixState[effect.key][bandIndex] = newVal;
+        valSpan.textContent = (newVal > 0 ? "+" : "") + newVal.toFixed(2);
+        updatePointerRotation(newVal);
+        saveAudioMatrixState();
+        sendAudioMatrix();
+      });
+      
+      container.appendChild(knobWrapper);
+      container.appendChild(valSpan);
+      grid.appendChild(container);
+    }
+  });
+}
+
 function crossfadeSecondsFromSlider(value) {
   const position = Math.max(0, Math.min(CROSSFADE_SLIDER_STEPS, Number(value) || 0));
   if (position <= 0) {
@@ -321,17 +654,26 @@ function formatCrossfadeSeconds(seconds) {
 function getProjectorEffects() {
   const crossfadeSeconds = crossfadeSecondsFromSlider(crossfadeInput.value);
   const gamma = Number.parseFloat(gammaInput.value);
+  const contrast = Number.parseFloat(contrastInput.value);
   const brightness = Number.parseFloat(brightnessInput.value);
   const saturation = Number.parseFloat(saturationInput.value);
   const meltAmount = Number.parseFloat(meltAmountInput.value);
   const meltVariation = Number.parseFloat(meltVariationInput.value);
   const meltSpeed = Number.parseFloat(meltSpeedInput.value);
+  const glowRadius = Number.parseFloat(glowRadiusInput.value);
+  const glowIntensity = Number.parseFloat(glowIntensityInput.value);
+  const glowFrequency = Number.parseFloat(glowFrequencyInput.value);
+  const glowHue = Number.parseFloat(glowHueInput.value);
+  const samOverlayAlpha = Number.parseFloat(samOverlayAlphaInput.value);
   const tiling = tilingInput.checked ? 1.0 : 0.0;
   return {
     crossfadeSeconds,
     gamma: Number.isFinite(gamma)
       ? Math.max(0.2, Math.min(3, gamma))
       : DEFAULT_PROJECTOR_EFFECTS.gamma,
+    contrast: Number.isFinite(contrast)
+      ? Math.max(0, Math.min(3, contrast))
+      : DEFAULT_PROJECTOR_EFFECTS.contrast,
     brightness: Number.isFinite(brightness)
       ? Math.max(-1, Math.min(1, brightness))
       : DEFAULT_PROJECTOR_EFFECTS.brightness,
@@ -347,6 +689,23 @@ function getProjectorEffects() {
     meltSpeed: Number.isFinite(meltSpeed)
       ? Math.max(0, Math.min(2, meltSpeed))
       : DEFAULT_PROJECTOR_EFFECTS.meltSpeed,
+    maskedSmudge: maskedSmudgeToggle ? maskedSmudgeToggle.checked : false,
+    glowRadius: Number.isFinite(glowRadius)
+      ? Math.max(0, Math.min(1, glowRadius))
+      : DEFAULT_PROJECTOR_EFFECTS.glowRadius,
+    glowIntensity: Number.isFinite(glowIntensity)
+      ? Math.max(0, Math.min(2, glowIntensity))
+      : DEFAULT_PROJECTOR_EFFECTS.glowIntensity,
+    glowFrequency: Number.isFinite(glowFrequency)
+      ? Math.max(0, Math.min(12, glowFrequency))
+      : DEFAULT_PROJECTOR_EFFECTS.glowFrequency,
+    glowHue: Number.isFinite(glowHue)
+      ? Math.max(0, Math.min(360, glowHue))
+      : DEFAULT_PROJECTOR_EFFECTS.glowHue,
+    samOverlay: samOverlayToggle ? samOverlayToggle.checked : false,
+    samOverlayAlpha: Number.isFinite(samOverlayAlpha)
+      ? Math.max(0, Math.min(1, samOverlayAlpha))
+      : DEFAULT_PROJECTOR_EFFECTS.samOverlayAlpha,
     tiling,
   };
 }
@@ -358,24 +717,43 @@ function sendProjectorEffects() {
 function updateProjectorEffects({ persist = true } = {}) {
   const effects = getProjectorEffects();
   crossfadeInput.value = String(crossfadeSliderFromSeconds(effects.crossfadeSeconds));
-  gammaInput.value = String(effects.gamma);
+  gammaInput.value = "1";
+  contrastInput.value = String(effects.contrast);
   brightnessInput.value = String(effects.brightness);
   saturationInput.value = String(effects.saturation);
   meltAmountInput.value = String(effects.meltAmount);
   meltVariationInput.value = String(effects.meltVariation);
   meltSpeedInput.value = String(effects.meltSpeed);
+  if (maskedSmudgeToggle) {
+    maskedSmudgeToggle.checked = !!effects.maskedSmudge;
+  }
+  glowRadiusInput.value = String(effects.glowRadius);
+  glowIntensityInput.value = String(effects.glowIntensity);
+  glowFrequencyInput.value = String(effects.glowFrequency);
+  glowHueInput.value = String(effects.glowHue);
+  samOverlayAlphaInput.value = String(effects.samOverlayAlpha);
   tilingInput.checked = effects.tiling > 0.5;
   crossfadeValue.value = formatCrossfadeSeconds(effects.crossfadeSeconds);
-  gammaValue.value = effects.gamma.toFixed(2);
+  gammaValue.value = "1.00";
+  contrastValue.value = effects.contrast.toFixed(2);
   brightnessValue.value = `${effects.brightness > 0 ? "+" : ""}${effects.brightness.toFixed(2)}`;
   saturationValue.value = effects.saturation.toFixed(2);
   meltAmountValue.value = effects.meltAmount.toFixed(2);
   meltVariationValue.value = effects.meltVariation.toFixed(2);
   meltSpeedValue.value = effects.meltSpeed.toFixed(2);
+  glowRadiusValue.value = effects.glowRadius.toFixed(2);
+  glowIntensityValue.value = effects.glowIntensity.toFixed(2);
+  glowFrequencyValue.value = effects.glowFrequency.toFixed(1);
+  glowHueValue.value = effects.glowHue.toFixed(0);
+  samOverlayAlphaValue.value = effects.samOverlayAlpha.toFixed(2);
+  if (samOverlayToggle) {
+    samOverlayToggle.checked = !!effects.samOverlay;
+  }
   if (persist) {
     window.localStorage.setItem(PROJECTOR_EFFECTS_KEY, JSON.stringify(effects));
   }
   sendProjectorEffects();
+  renderPreviewMaskOverlay();
 }
 
 function loadProjectorEffects() {
@@ -389,12 +767,24 @@ function loadProjectorEffects() {
   crossfadeInput.value = String(crossfadeSliderFromSeconds(
     source.crossfadeSeconds ?? DEFAULT_PROJECTOR_EFFECTS.crossfadeSeconds,
   ));
-  gammaInput.value = String(source.gamma ?? DEFAULT_PROJECTOR_EFFECTS.gamma);
+  gammaInput.value = "1";
+  contrastInput.value = String(source.contrast ?? DEFAULT_PROJECTOR_EFFECTS.contrast);
   brightnessInput.value = String(source.brightness ?? DEFAULT_PROJECTOR_EFFECTS.brightness);
   saturationInput.value = String(source.saturation ?? DEFAULT_PROJECTOR_EFFECTS.saturation);
   meltAmountInput.value = String(source.meltAmount ?? DEFAULT_PROJECTOR_EFFECTS.meltAmount);
   meltVariationInput.value = String(source.meltVariation ?? DEFAULT_PROJECTOR_EFFECTS.meltVariation);
   meltSpeedInput.value = String(source.meltSpeed ?? DEFAULT_PROJECTOR_EFFECTS.meltSpeed);
+  if (maskedSmudgeToggle) {
+    maskedSmudgeToggle.checked = !!(source.maskedSmudge ?? DEFAULT_PROJECTOR_EFFECTS.maskedSmudge);
+  }
+  glowRadiusInput.value = String(source.glowRadius ?? DEFAULT_PROJECTOR_EFFECTS.glowRadius);
+  glowIntensityInput.value = String(source.glowIntensity ?? DEFAULT_PROJECTOR_EFFECTS.glowIntensity);
+  glowFrequencyInput.value = String(source.glowFrequency ?? DEFAULT_PROJECTOR_EFFECTS.glowFrequency);
+  glowHueInput.value = String(source.glowHue ?? DEFAULT_PROJECTOR_EFFECTS.glowHue);
+  samOverlayAlphaInput.value = String(source.samOverlayAlpha ?? DEFAULT_PROJECTOR_EFFECTS.samOverlayAlpha);
+  if (samOverlayToggle) {
+    samOverlayToggle.checked = !!(source.samOverlay ?? DEFAULT_PROJECTOR_EFFECTS.samOverlay);
+  }
   updateProjectorEffects({ persist: false });
 }
 
@@ -693,6 +1083,21 @@ function selectProjectedImage(index, { notify = true } = {}) {
   if (notify && projectorChannel) {
     projectorChannel.postMessage({ type: "select", index: projectedImageIndex });
   }
+  renderPreviewMaskOverlay();
+}
+
+function renderPreviewMaskOverlay() {
+  const maskSource = projectionMasks[projectedImageIndex];
+  const showOverlay = !!(samOverlayToggle?.checked && maskSource && projectionImages.length === 1);
+  maskPreviewImage.hidden = !showOverlay;
+  if (!showOverlay) {
+    maskPreviewImage.removeAttribute("src");
+    return;
+  }
+  if (maskPreviewImage.src !== maskSource) {
+    maskPreviewImage.src = maskSource;
+  }
+  maskPreviewImage.style.opacity = String(getProjectorEffects().samOverlayAlpha);
 }
 
 function makeProjectionThumbnail(image, index) {
@@ -703,15 +1108,22 @@ function makeProjectionThumbnail(image, index) {
   image.setAttribute("aria-label", `Project batch image ${index + 1}`);
 }
 
-function setProjectionBatch(encodedImages) {
-  projectionImages = encodedImages.map((encoded) => `data:image/png;base64,${encoded}`);
+function setProjectionBatch(encodedImages, encodedMasks) {
+  const nextImages = Array.isArray(encodedImages) ? encodedImages : [];
+  const nextMasks = Array.isArray(encodedMasks) ? encodedMasks : [];
+  segmentationRequestId += 1;
+  projectionImages = nextImages.map(imageDataUrl);
+  projectionMasks = projectionImages.map((_, index) => maskDataUrl(nextMasks[index]));
   projectedImageIndex = 0;
   selectProjectedImage(0, { notify: false });
   sendProjectionBatch();
+  renderPreviewMaskOverlay();
 }
 
 function clearGeneratedImages() {
+  segmentationRequestId += 1;
   projectionImages = [];
+  projectionMasks = [];
   projectedImageIndex = 0;
   previewImage.hidden = true;
   previewImage.removeAttribute("src");
@@ -721,6 +1133,8 @@ function clearGeneratedImages() {
   previewImage.removeAttribute("tabindex");
   previewImage.removeAttribute("aria-label");
   previewImage.removeAttribute("aria-pressed");
+  maskPreviewImage.hidden = true;
+  maskPreviewImage.removeAttribute("src");
   imageSlot.querySelectorAll("img.dynamic-preview").forEach((image) => image.remove());
   imageSlot.classList.remove("has-image", "two-row-batch");
   sendProjectionBatch();
@@ -781,6 +1195,7 @@ projectorChannel?.addEventListener("message", (event) => {
     sendAudioThresholds();
     sendAudioInputGain();
     sendProjectorEffects();
+    sendAudioMatrix();
   } else if (event.data?.type === "select") {
     selectProjectedImage(Number.parseInt(event.data.index, 10), { notify: false });
   } else if (event.data?.type === "audio") {
@@ -908,6 +1323,10 @@ function normalizeSettings(settings, fallback = DEFAULT_GENERATION_SETTINGS) {
       : Number.parseInt(settings.seed, 10);
   const translate =
     typeof settings?.translate === "boolean" ? settings.translate : Boolean(fallback.translate);
+  const sam =
+    typeof settings?.sam === "boolean" ? settings.sam : Boolean(fallback.sam);
+  const samPrompt =
+    typeof settings?.sam_prompt === "string" ? settings.sam_prompt : (fallback.sam_prompt ?? SAM_SEGMENT_PROMPT);
   const batchSize = Number.parseInt(settings?.batch_size ?? fallback.batch_size ?? 1, 10);
   const batchWalk = typeof settings?.batch_walk === "boolean" ? settings.batch_walk : Boolean(fallback.batch_walk);
   const promptBlendEnabled =
@@ -931,6 +1350,8 @@ function normalizeSettings(settings, fallback = DEFAULT_GENERATION_SETTINGS) {
     batch_size: Number.isFinite(batchSize) ? Math.max(1, Math.min(8, batchSize)) : 1,
     batch_walk: batchWalk,
     translate,
+    sam,
+    sam_prompt: samPrompt,
     prompt:
       typeof settings?.prompt === "string"
         ? settings.prompt
@@ -1017,6 +1438,12 @@ function applyGenerationSettings(settings) {
   seedInput.value = settings.seed === null ? "" : String(settings.seed);
   batchInput.value = String(settings.batch_size);
   batchWalkToggle.checked = settings.batch_walk;
+  if (samToggle) {
+    samToggle.checked = !!settings.sam;
+  }
+  if (samPromptInput) {
+    samPromptInput.value = settings.sam_prompt !== undefined ? settings.sam_prompt : SAM_SEGMENT_PROMPT;
+  }
   translateToggle.checked = settings.translate;
   promptInput.value = settings.prompt;
   sequenceIntervalInput.value = String(settings.sequence_interval_seconds);
@@ -1080,6 +1507,7 @@ function saveGenerationSettings() {
       prompt_blend_enabled: isPromptBlendEnabled(),
       additional_prompt: additionalPromptInput.value,
       additional_prompt_weight: getPromptBlendWeight(),
+      sam_prompt: samPromptInput ? samPromptInput.value : SAM_SEGMENT_PROMPT,
     }),
   );
 }
@@ -1100,6 +1528,8 @@ function getGenerationSettings() {
     batch_size: Number.parseInt(batchInput.value, 10) || 1,
     batch_walk: batchWalkToggle.checked,
     ...(batchWalkToggle.checked ? { prompt_walk_scale: getWalkAmplitude() } : {}),
+    sam: samToggle ? samToggle.checked : false,
+    sam_prompt: samPromptInput ? samPromptInput.value : SAM_SEGMENT_PROMPT,
     translate: translateToggle.checked,
     prompt_blend_enabled: promptBlendEnabled,
     additional_prompt: promptBlendEnabled && additionalPrompt ? additionalPrompt : null,
@@ -1249,6 +1679,8 @@ async function generateImage({
   }
   const requestId = ++latestRequestId;
   setStatus(statusLabel, "busy");
+  const effects = getProjectorEffects();
+  const shouldSegmentEffectsFallback = !settings.sam && (effects.samOverlay || effects.maskedSmudge);
 
   try {
     const response = await fetch("/api/generate", {
@@ -1268,6 +1700,25 @@ async function generateImage({
       return { ok: false, stale: true };
     }
 
+    let masks_png_base64 = Array.isArray(payload.masks_png_base64)
+      ? payload.masks_png_base64
+      : null;
+    if (shouldSegmentEffectsFallback && !masks_png_base64) {
+      const images_png_base64 = payload.images_png_base64 || (payload.image_png_base64 ? [payload.image_png_base64] : []);
+      if (images_png_base64.length > 0) {
+        try {
+          masks_png_base64 = await segmentImagesBase64(
+            images_png_base64,
+          );
+        } catch (error) {
+          console.error("SAM error:", error);
+        }
+        if (requestId !== latestRequestId || payload.stale) {
+          return { ok: false, stale: true };
+        }
+      }
+    }
+
     console.log(
       [
         payload.translated_prompt || payload.prompt || "",
@@ -1277,7 +1728,6 @@ async function generateImage({
         .filter(Boolean)
         .join("\n"),
     );
-
     if (payload.images_png_base64 && payload.images_png_base64.length > 0) {
       imageSlot.classList.toggle("two-row-batch", payload.images_png_base64.length > 4);
       // Clear dynamically added images (keep previewImage and emptyPreview)
@@ -1302,19 +1752,25 @@ async function generateImage({
         }
       }
 
-      setProjectionBatch(payload.images_png_base64);
+      setProjectionBatch(payload.images_png_base64, masks_png_base64);
       selectProjectedImage(0, { notify: false });
       imageSlot.classList.add("has-image");
-      setStatus(`${payload.elapsed_ms} ms`, "ready");
+      setStatus(
+        settings.sam ? `${payload.elapsed_ms} ms - ${hasProjectionMasks() ? "SAM mask ready" : "No SAM mask"}` : `${payload.elapsed_ms} ms`,
+        hasProjectionMasks() || !settings.sam ? "ready" : "error",
+      );
     } else if (payload.image_png_base64) {
       imageSlot.classList.remove("two-row-batch");
       previewImage.src = `data:image/png;base64,${payload.image_png_base64}`;
       previewImage.hidden = false;
       makeProjectionThumbnail(previewImage, 0);
-      setProjectionBatch([payload.image_png_base64]);
+      setProjectionBatch([payload.image_png_base64], masks_png_base64);
       selectProjectedImage(0, { notify: false });
       imageSlot.classList.add("has-image");
-      setStatus(`${payload.elapsed_ms} ms`, "ready");
+      setStatus(
+        settings.sam ? `${payload.elapsed_ms} ms - ${hasProjectionMasks() ? "SAM mask ready" : "No SAM mask"}` : `${payload.elapsed_ms} ms`,
+        hasProjectionMasks() || !settings.sam ? "ready" : "error",
+      );
     }
     return { ok: true, payload };
   } catch (error) {
@@ -2219,6 +2675,29 @@ imageSlot.addEventListener("keydown", (event) => {
     scheduleGeneration({ force: true });
   });
 });
+
+if (samToggle) {
+  samToggle.addEventListener("change", async () => {
+    saveGenerationSettings();
+
+    if (samToggle.checked) {
+      if (projectionNeedsSegmentation()) {
+        try {
+          const segmented = await segmentCurrentProjectionImages();
+          setStatus(segmented ? "SAM active" : "No SAM mask", segmented ? "ready" : "error");
+        } catch (error) {
+          setStatus(error.message || "SAM Error", "error");
+        }
+      } else {
+        sendProjectionBatch();
+        setStatus("SAM active", "ready");
+      }
+    } else {
+      sendProjectionBatch();
+      setStatus("SAM paused", "ready");
+    }
+  });
+}
 modelSelect.addEventListener("input", () => {
   if (!sequenceActive) {
     clearSequenceIndicator();
@@ -2261,9 +2740,56 @@ sequenceModeButtons.forEach((button) => {
   });
 });
 audioInputGain.addEventListener("input", updateAudioInputGain);
-[crossfadeInput, gammaInput, brightnessInput, saturationInput,
-  meltAmountInput, meltVariationInput, meltSpeedInput, tilingInput].forEach((input) => {
-  input.addEventListener("input", updateProjectorEffects);
+[crossfadeInput, gammaInput, contrastInput, brightnessInput, saturationInput,
+  meltAmountInput, meltVariationInput, meltSpeedInput, maskedSmudgeToggle,
+  glowRadiusInput, glowIntensityInput, glowFrequencyInput, glowHueInput,
+  tilingInput, samOverlayToggle, samOverlayAlphaInput].forEach((input) => {
+  if (input) {
+    input.addEventListener("input", updateProjectorEffects);
+    input.addEventListener("change", updateProjectorEffects);
+  }
+});
+if (samOverlayToggle) {
+  samOverlayToggle.addEventListener("change", async () => {
+    if (!samOverlayToggle.checked || !projectionNeedsSegmentation()) {
+      return;
+    }
+    try {
+      const segmented = await segmentCurrentProjectionImages({ statusLabel: "Segmenting overlay" });
+      setStatus(segmented ? "SAM overlay active" : "No SAM mask", segmented ? "ready" : "error");
+    } catch (error) {
+      setStatus(error.message || "SAM Error", "error");
+    }
+  });
+}
+[maskedSmudgeToggle].forEach((input) => {
+  input?.addEventListener("change", async () => {
+    if (!maskedSmudgeToggle.checked || !projectionNeedsSegmentation()) {
+      return;
+    }
+    try {
+      const segmented = await segmentCurrentProjectionImages({ statusLabel: "Segmenting masked smudge" });
+      setStatus(segmented ? "Masked smudge active" : "No SAM mask", segmented ? "ready" : "error");
+    } catch (error) {
+      setStatus(error.message || "SAM Error", "error");
+    }
+  });
+});
+[glowRadiusInput, glowIntensityInput, glowFrequencyInput, glowHueInput].forEach((input) => {
+  input.addEventListener("change", async () => {
+    const effects = getProjectorEffects();
+    if (
+      projectionNeedsSegmentation()
+      && (samToggle?.checked || effects.samOverlay || effects.maskedSmudge || effects.glowIntensity > 0.01)
+    ) {
+      try {
+        const segmented = await segmentCurrentProjectionImages({ statusLabel: "Segmenting glow" });
+        setStatus(segmented ? "SAM glow active" : "No SAM mask", segmented ? "ready" : "error");
+      } catch (error) {
+        setStatus(error.message || "SAM Error", "error");
+      }
+    }
+  });
 });
 audioSpectrumCanvas.addEventListener("pointerdown", (event) => {
   const rectangle = audioSpectrumCanvas.getBoundingClientRect();
@@ -2306,6 +2832,47 @@ audioPanelToggle.addEventListener("click", () => {
 effectsPanelToggle.addEventListener("click", () => {
   setEffectsPanelCollapsed(effectsPanel.dataset.collapsed !== "true");
 });
+const audioMatrixPanelToggle = document.getElementById("audioMatrixPanelToggle");
+if (audioMatrixPanelToggle) {
+  audioMatrixPanelToggle.addEventListener("click", () => {
+    const panel = document.getElementById("audioMatrixPanel");
+    setAudioMatrixPanelCollapsed(panel.dataset.collapsed !== "true");
+  });
+}
+if (samPromptInput) {
+  const triggerSamUpdate = async () => {
+    const effects = getProjectorEffects();
+    const samActive = (samToggle && samToggle.checked) || effects.samOverlay || effects.maskedSmudge || effects.glowIntensity > 0.01;
+    if (samActive) {
+      projectionMasks = projectionImages.map(() => null);
+      try {
+        const segmented = await segmentCurrentProjectionImages();
+        setStatus(segmented ? "SAM updated" : "No SAM mask", segmented ? "ready" : "error");
+      } catch (error) {
+        setStatus(error.message || "SAM Error", "error");
+      }
+    }
+  };
+
+  samPromptInput.addEventListener("input", async () => {
+    saveGenerationSettings();
+    if (samPromptInput.value.endsWith(" ")) {
+      void triggerSamUpdate();
+    }
+  });
+
+  samPromptInput.addEventListener("change", () => {
+    void triggerSamUpdate();
+  });
+
+  samPromptInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      saveGenerationSettings();
+      void triggerSamUpdate();
+    }
+  });
+}
 window.addEventListener("resize", drawAudioSpectrum);
 if ("ResizeObserver" in window) {
   new ResizeObserver(drawAudioSpectrum).observe(audioSpectrumCanvas);
@@ -2315,6 +2882,8 @@ window.addEventListener("load", () => {
   growAdditionalPromptTextarea();
   loadAudioPanelState();
   loadEffectsPanelState();
+  initializeAudioMatrixUI();
+  loadAudioMatrixPanelState();
   loadAudioInputGain();
   loadAudioThresholds();
   loadProjectorEffects();

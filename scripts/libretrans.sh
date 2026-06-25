@@ -1,6 +1,6 @@
 docker run --rm -it \
   --name libretranslate-es-en-cpu \
-  -p 5000:5000 \
+  -p 5070:5000 \
   -e LT_LOAD_ONLY=es,en \
   -e LT_UPDATE_MODELS=true \
   -e LT_DISABLE_WEB_UI=true \
@@ -12,7 +12,7 @@ docker run --rm -it \
   docker run --rm -it \
   --name libretranslate-es-en-gpu \
   --gpus all \
-  -p 5000:5000 \
+  -p 5070:5000 \
   -e ARGOS_DEVICE_TYPE=cuda \
   -e LT_LOAD_ONLY=es,en \
   -e LT_UPDATE_MODELS=true \

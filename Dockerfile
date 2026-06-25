@@ -68,6 +68,6 @@ RUN git lfs install --system \
 WORKDIR /workspace
 USER ${USERNAME}
 
-EXPOSE 8000
+EXPOSE 8070
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["bash"]

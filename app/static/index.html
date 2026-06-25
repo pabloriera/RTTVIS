@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>RTIAVIS Image Prompt</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=2" />
   </head>
   <body>
     <main class="app-shell">
@@ -122,7 +122,21 @@
                         <span>Perturbed batch</span>
                         <input id="batchWalkToggle" name="batchWalk" type="checkbox" />
                       </label>
+                      <label class="inline-checkbox">
+                        <span>SAM</span>
+                        <input id="samToggle" name="sam" type="checkbox" />
+                      </label>
                     </div>
+
+                    <label class="field-group sam-prompt-field">
+                      <span>SAM Prompt</span>
+                      <textarea
+                        id="samPromptInput"
+                        name="samPrompt"
+                        class="sam-prompt-textarea"
+                        placeholder="people and animals"
+                      >people and animals</textarea>
+                    </label>
 
                   </div>
                 </div>
@@ -194,9 +208,13 @@
                         <span>Crossfade <output id="crossfadeValue">1.0s</output></span>
                         <input id="crossfadeInput" type="range" min="0" max="100" step="0.1" value="47.4" aria-label="Crossfade time on a logarithmic scale" />
                       </label>
-                      <label class="effect-control">
+                      <label class="effect-control" style="display: none;">
                         <span>Gamma <output id="gammaValue">1.00</output></span>
                         <input id="gammaInput" type="range" min="0.2" max="3" step="0.05" value="1" />
+                      </label>
+                      <label class="effect-control">
+                        <span>Contrast <output id="contrastValue">1.00</output></span>
+                        <input id="contrastInput" type="range" min="0" max="3" step="0.01" value="1" />
                       </label>
                       <label class="effect-control">
                         <span>Brightness <output id="brightnessValue">0.00</output></span>
@@ -219,11 +237,62 @@
                         <input id="meltSpeedInput" type="range" min="0" max="2" step="0.01" value="0.35" />
                       </label>
                       <label class="effect-control">
+                        <span>Masked smudge</span>
+                        <input id="maskedSmudgeToggle" type="checkbox" />
+                      </label>
+                      <label class="effect-control">
+                        <span>Glow radius <output id="glowRadiusValue">0.00</output></span>
+                        <input id="glowRadiusInput" name="glowRadius" type="range" min="0" max="1" step="0.01" value="0" />
+                      </label>
+                      <label class="effect-control">
+                        <span>Glow intensity <output id="glowIntensityValue">0.50</output></span>
+                        <input id="glowIntensityInput" name="glowIntensity" type="range" min="0" max="2" step="0.01" value="0.5" />
+                      </label>
+                      <label class="effect-control">
+                        <span>Glow frequency <output id="glowFrequencyValue">4.00</output></span>
+                        <input id="glowFrequencyInput" name="glowFrequency" type="range" min="0" max="12" step="0.1" value="4" />
+                      </label>
+                      <label class="effect-control">
+                        <span>Glow hue <output id="glowHueValue">195</output></span>
+                        <input id="glowHueInput" name="glowHue" type="range" min="0" max="360" step="1" value="195" />
+                      </label>
+                      <label class="effect-control">
                         <span>Reflection Tiling</span>
                         <input id="tilingInput" type="checkbox" checked />
                       </label>
+                      <label class="effect-control">
+                        <span>SAM Overlay</span>
+                        <input id="samOverlayToggle" type="checkbox" />
+                      </label>
+                      <label class="effect-control">
+                        <span>SAM Overlay alpha <output id="samOverlayAlphaValue">0.65</output></span>
+                        <input id="samOverlayAlphaInput" name="samOverlayAlpha" type="range" min="0" max="1" step="0.01" value="0.65" />
+                      </label>
                     </div>
                   </div>
+
+                  <div id="audioMatrixPanel" class="effects-panel" aria-label="Audio Matrix">
+                    <div class="effects-panel-header">
+                      <span class="effects-panel-title"><span aria-hidden="true" style="background: #0ea5e9; box-shadow: 0 0 0 3px rgb(14 165 233 / 12%);"></span>Audio Matrix <small>Map bands to VJ sliders</small></span>
+                      <button id="audioMatrixPanelToggle" class="panel-collapse-button" type="button" aria-controls="audioMatrixControls" aria-expanded="true" aria-label="Collapse audio matrix panel" title="Collapse audio matrix panel">&#9662;</button>
+                    </div>
+                    <div id="audioMatrixControls" class="audio-matrix-controls">
+                      <div class="audio-matrix-master" style="border-bottom: 1px dashed var(--line); padding-bottom: 8px; margin-bottom: 8px;">
+                        <label class="effect-control" style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+                          <span style="font-size: 11px; color: var(--ink);">Matrix Master Gain <output id="audioMatrixGainValue" style="color: #0ea5e9; font-weight: bold; margin-left: 5px;">1.00x</output></span>
+                          <input id="audioMatrixGainInput" type="range" min="0" max="2" step="0.05" value="1.0" style="flex-grow: 1; height: 16px; accent-color: #0ea5e9;" />
+                        </label>
+                      </div>
+                      <div class="audio-matrix-grid">
+                        <div class="audio-matrix-header">Effect</div>
+                        <div class="audio-matrix-header" style="text-align: center; color: #0f766e;">Bass</div>
+                        <div class="audio-matrix-header" style="text-align: center; color: #0284c7;">Low</div>
+                        <div class="audio-matrix-header" style="text-align: center; color: #7c3aed;">Mid</div>
+                        <div class="audio-matrix-header" style="text-align: center; color: #d97706;">High</div>
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
               </div>
 
@@ -247,6 +316,6 @@
       </section>
     </main>
 
-    <script type="module" src="/static/app.js"></script>
+    <script type="module" src="/static/app.js?v=2"></script>
   </body>
 </html>

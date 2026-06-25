@@ -13,7 +13,7 @@ except ImportError as e:
     print("Please install them using: pip install httpx numpy Pillow")
     sys.exit(1)
 
-def get_sam3_mask(image_path: str, server_ip: str, port: int = 9000, prompt: str = "person"):
+def get_sam3_mask(image_path: str, server_ip: str, port: int, prompt: str = "person"):
     """
     Sends an image to the SAM 3 service and returns a NumPy array 
     where each pixel value represents an instance ID.
@@ -59,17 +59,17 @@ def get_sam3_mask(image_path: str, server_ip: str, port: int = 9000, prompt: str
         sys.exit(1)
 
 def main():
-    parser = argparse.ArgumentParser(description="Test SAM 3 service accessibility on machine 10.1.100.79")
+    parser = argparse.ArgumentParser(description="Test SAM 3 service accessibility")
     parser.add_argument(
         "--server", 
-        default="10.1.100.79", 
-        help="IP address of the SAM 3 server (default: 10.1.100.79)"
+        default="", 
+        help="IP address of the SAM 3 server"
     )
     parser.add_argument(
         "--port", 
         type=int,
-        default=9000, 
-        help="Port of the SAM 3 server (default: 9000)"
+        default=None, 
+        help="Port of the SAM 3 server"
     )
     parser.add_argument(
         "--image", 
@@ -88,6 +88,13 @@ def main():
     )
     
     args = parser.parse_args()
+
+    if not args.server:
+        print("Error: Please specify the --server IP address.")
+        sys.exit(1)
+    if args.port is None:
+        print("Error: Please specify the --port.")
+        sys.exit(1)
     
     # Run the segmenter
     mask = get_sam3_mask(args.image, args.server, args.port, args.prompt)
